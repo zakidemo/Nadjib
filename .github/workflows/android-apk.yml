@@ -10,6 +10,17 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Show repo tree (debug)
+        run: |
+          pwd
+          ls -la
+          echo "---- find package.json ----"
+          find . -maxdepth 5 -name package.json -print
+          echo "---- find capacitor config ----"
+          find . -maxdepth 6 -name "capacitor.config.*" -print
+          echo "---- find android folder ----"
+          find . -maxdepth 6 -type d -name android -print
+
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
@@ -21,22 +32,40 @@ jobs:
           distribution: "temurin"
           java-version: "17"
 
-      - name: Install deps
-        working-directory: najib_phone_app/capacitor
-        run: npm ci
-
-      - name: Add Android + Sync
-        working-directory: najib_phone_app/capacitor
+      - name: Install deps + build web (auto-detect)
         run: |
+          # Detect the folder that contains capacitor.config.* (preferred)
+          CAP_DIR=$(dirname "$(find . -maxdepth 6 -name 'capacitor.config.*' | head -n 1)")
+          if [ -z "$CAP_DIR" ]; then
+            echo "No capacitor.config.* found. Falling back to folder containing package.json..."
+            CAP_DIR=$(dirname "$(find . -maxdepth 5 -name package.json | head -n 1)")
+          fi
+
+          echo "Using project dir: $CAP_DIR"
+          cd "$CAP_DIR"
+
+          npm ci || npm install
+          # If you have a build step for web assets, keep it:
+          npm run build --if-present
+
           npx cap add android || true
           npx cap sync android
 
       - name: Build Debug APK
-        working-directory: najib_phone_app/capacitor/android
-        run: ./gradlew assembleDebug
+        run: |
+          ANDROID_DIR=$(find . -maxdepth 8 -type f -path "*android/gradlew" -print | head -n 1)
+          if [ -z "$ANDROID_DIR" ]; then
+            echo "Could not find android/gradlew. Check tree output above."
+            exit 1
+          fi
+          ANDROID_DIR=$(dirname "$ANDROID_DIR")
+          echo "Using Android dir: $ANDROID_DIR"
+          cd "$ANDROID_DIR"
+          chmod +x ./gradlew
+          ./gradlew assembleDebug
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: NajibKidsMath-APK
-          path: najib_phone_app/capacitor/android/app/build/outputs/apk/debug/app-debug.apk
+          path: "**/app/build/outputs/apk/debug/app-debug.apk"
